@@ -54,6 +54,9 @@ const showStepDesc = ref(false);
 const logInput = ref('');
 const analysisLogHistory = ref<string[]>([]);
 const analysisError = ref(false);
+const swappedIndices = ref<number[]>([]);
+const logErrorCount = ref(0);
+const logErrorMessage = ref('');
 
 // AI Chat State
 interface ChatMessage {
@@ -64,11 +67,28 @@ const chatMessages = ref<ChatMessage[]>([]);
 const isAiTyping = ref(false);
 const chatInput = ref('');
 
+const quickReplies = [
+  '比较了相邻的两个数',
+  '左边比右边大，所以交换了',
+  '左边不大于右边，保持原位',
+  '最大的数冒泡到了最右侧',
+  '本轮没有发生任何交换',
+  '比较次数比上一轮少了一次'
+];
+
+interface RoundRecord {
+  round: number;
+  sequence: string;
+  comparisons: number;
+  swaps: number;
+}
+const sortedHistory = ref<RoundRecord[]>([]);
+const showHistoryDialog = ref(false);
+
 // Assessment Mode State
-const answers = ref({
-  q1: '',
-  q2: '',
-  q3: '',
+const answers = ref<Record<string, string>>({
+  q1: '', q2: '', q3: '', q4: '', q5: '',
+  q6: '', q7: '', q8: '', q9: '', q10: '',
   subjective: ''
 });
 const assessmentResult = ref<'idle' | 'success' | 'fail'>('idle');
@@ -197,9 +217,17 @@ const startAnalysis = () => {
   analysisLogHistory.value = [];
   currentRoundComparisons.value = 0;
   currentRoundSwaps.value = 0;
+  swappedIndices.value = [];
   showAnalysisHint.value = false;
   aiChatType.value = 'step';
   currentPage.value = 'analysis';
+  
+  sortedHistory.value = [{
+    round: 0,
+    sequence: bubbles.value.map(b => b.value).join(', '),
+    comparisons: 0,
+    swaps: 0
+  }];
 };
 
 const checkAnalysisLogic = async (shouldSwap: boolean) => {
@@ -214,6 +242,7 @@ const checkAnalysisLogic = async (shouldSwap: boolean) => {
     if (shouldSwap) {
       currentRoundSwaps.value++;
       isSwapping.value = true;
+      swappedIndices.value.push(i);
       await new Promise(resolve => setTimeout(resolve, 50));
       const temp = bubbles.value[i];
       bubbles.value[i] = bubbles.value[i + 1];
@@ -239,14 +268,38 @@ const submitLog = () => {
   const expected = bubbles.value.map(b => b.value).join(',');
   const cleanedInput = logInput.value.replace(/\s/g, '').replace(/，/g, ',');
   
-  if (cleanedInput === expected && 
-      parseInt(comparisonsInput.value) === currentRoundComparisons.value && 
-      parseInt(swapsInput.value) === currentRoundSwaps.value) {
+  const isSequenceCorrect = cleanedInput === expected;
+  const isComparisonsCorrect = parseInt(comparisonsInput.value) === currentRoundComparisons.value;
+  const isSwapsCorrect = parseInt(swapsInput.value) === currentRoundSwaps.value;
+
+  if (isSequenceCorrect && isComparisonsCorrect && isSwapsCorrect) {
+    sortedHistory.value.push({
+      round: analysisPass.value + 1,
+      sequence: bubbles.value.map(b => b.value).join(', '),
+      comparisons: currentRoundComparisons.value,
+      swaps: currentRoundSwaps.value
+    });
+
     showLogDialog.value = false;
+    logErrorCount.value = 0;
+    logErrorMessage.value = '';
     aiChatType.value = 'step';
     showStepDesc.value = true; // Ask for description after log
   } else {
-    alert('记录不正确，请仔细核对星核的顺序、比较次数和交换次数！');
+    logErrorCount.value++;
+    
+    if (logErrorCount.value >= 3) {
+      logErrorMessage.value = `小智提示：星核顺序应该是 ${expected}，比较了 ${currentRoundComparisons.value} 次，交换了 ${currentRoundSwaps.value} 次。我已经帮你填好了，你可以直接提交！`;
+      logInput.value = expected;
+      comparisonsInput.value = currentRoundComparisons.value.toString();
+      swapsInput.value = currentRoundSwaps.value.toString();
+    } else {
+      let errors = [];
+      if (!isSequenceCorrect) errors.push('星核顺序');
+      if (!isComparisonsCorrect) errors.push('比较次数');
+      if (!isSwapsCorrect) errors.push('交换次数');
+      logErrorMessage.value = `记录不正确，你的【${errors.join('、')}】填错了，请仔细核对！`;
+    }
   }
 };
 
@@ -301,16 +354,17 @@ const sendMessageToAi = async () => {
 4. 语言简练，每次回复不超过100字，多用启发式提问。`;
 
     const systemPromptFinal = `你叫小智，是小学五年级信息技术课的AI助教。学生刚刚完成了冒泡排序的所有步骤。
-你向学生提出了两个问题：
-1. 冒泡排序每一轮分别固定了什么数？有什么特点？（答案要点：每一轮固定了当前未排序部分的最大数，特点是像泡泡一样移动到最右侧）
-2. 从第二轮开始，排序时可以简化哪一步，要比较几次？（答案要点：可以简化与已经固定的最大数的比较，比较次数每次减少1次）
+你向学生提出了一个任务：请结合刚才的体验，用自己的话归纳冒泡排序的算法步骤。
+标准答案应包含以下两步的核心意思：
+第 1 步: 比较相邻的两个数，如果第一个比第二个大，就交换位置。对每一对相邻数进行同样的操作，从开始两个数到最后两个数。操作后，排在最后面的数就是最大数。
+第 2 步: 除已排序的数，重复第 1 步的操作，对其余数进行比较与交换，直到没有任何一对数需要交换位置。
 
 你的任务是评价学生的回答。
 严格遵守以下规则：
 1. 如果学生回答无关内容，严厉批评并引导回问题。
-2. 针对学生的回答，指出正确的部分，补充不完整的部分。
+2. 针对学生的回答，指出正确的部分，补充不完整的部分。引导他们说出完整的两步。
 3. 语气亲切，符合五年级设定。
-4. 语言简练，不超过100字。`;
+4. 语言简练，不超过150字。`;
 
     const systemPrompt = aiChatType.value === 'final' ? systemPromptFinal : systemPromptStep;
 
@@ -359,7 +413,10 @@ const finishAnalysisPass = () => {
     swapsInput.value = '';
     currentRoundComparisons.value = 0;
     currentRoundSwaps.value = 0;
+    swappedIndices.value = [];
     showAnalysisHint.value = false;
+    logErrorCount.value = 0;
+    logErrorMessage.value = '';
     
     if (analysisPass.value >= bubbles.value.length - 1) {
       bubbles.value[0].isLocked = true;
@@ -374,15 +431,31 @@ const finishAnalysisPass = () => {
 };
 
 // Page 3: Assessment
+const assessmentQuestions = [
+  { id: 'q1', title: '1. 冒泡排序的基本规则是比较什么位置的两个数？', options: [{id: 'any', t: '任意两个数'}, {id: 'adjacent', t: '相邻的两个数'}, {id: 'ends', t: '第一个和最后一个数'}] },
+  { id: 'q2', title: '2. 在从小到大的冒泡排序中，什么时候需要交换两个数的位置？', options: [{id: 'greater', t: '左边的数大于右边的数'}, {id: 'less', t: '左边的数小于右边的数'}, {id: 'equal', t: '两个数相等时'}] },
+  { id: 'q3', title: '3. 第一轮冒泡排序结束后，哪个数会被固定在最右侧？', options: [{id: 'min', t: '最小的数'}, {id: 'max', t: '最大的数'}, {id: 'random', t: '随机的一个数'}] },
+  { id: 'q4', title: '4. 从第二轮开始，排序时可以简化哪一步？', options: [{id: 'stop', t: '不再需要比较'}, {id: 'reduce', t: '比较次数可以减少一次'}, {id: 'restart', t: '重新打乱顺序'}] },
+  { id: 'q5', title: '5. 冒泡排序什么时候说明已经全部排好序了？', options: [{id: 'ten', t: '比较了10次之后'}, {id: 'right', t: '最大的数到了最右边'}, {id: 'noswap', t: '整轮比较中没有任何一对数需要交换'}] },
+  { id: 'q6', title: '6. 【学习活动2】算法在计算机解决问题时起到了什么作用？', options: [{id: 'steps', t: '提供了明确的求解步骤'}, {id: 'ui', t: '提供了好看的界面'}, {id: 'storage', t: '提供了存储空间'}] },
+  { id: 'q7', title: '7. 【学习活动2】什么是实现自动化和智能化的基础？', options: [{id: 'hardware', t: '鼠标和键盘'}, {id: 'algorithm', t: '算法'}, {id: 'display', t: '显示器'}] },
+  { id: 'q8', title: '8. 【学习活动2】针对同一个问题，不同的算法会产生什么影响？', options: [{id: 'none', t: '没有任何影响'}, {id: 'efficiency', t: '可能产生不同的解决方案和执行效率'}, {id: 'error', t: '计算机会报错'}] },
+  { id: 'q9', title: '9. 【学习活动2】选择最优的算法可以带来什么好处？', options: [{id: 'increase', t: '增加计算量'}, {id: 'optimize', t: '减少计算量、降低存储需求'}, {id: 'heavy', t: '让电脑变重'}] },
+  { id: 'q10', title: '10. 【学习活动2】程序设计的主要依据和解决实际问题的策略是什么？', options: [{id: 'basis', t: '算法'}, {id: 'game', t: '游戏规则'}, {id: 'device', t: '硬件设备'}] }
+];
+
 const checkAssessment = () => {
-  const q1Correct = answers.value.q1 === 'adjacent';
-  const q2Correct = answers.value.q2 === 'max';
-  const q3Correct = answers.value.q3 === 'done';
+  const correctAnswers: Record<string, string> = {
+    q1: 'adjacent', q2: 'greater', q3: 'max', q4: 'reduce', q5: 'noswap',
+    q6: 'steps', q7: 'algorithm', q8: 'efficiency', q9: 'optimize', q10: 'basis'
+  };
+  
+  const allMcqCorrect = Object.keys(correctAnswers).every(k => answers.value[k] === correctAnswers[k]);
   
   const keywords = ['相邻', '比较', '交换', '最后'];
   const subjectiveCorrect = keywords.every(k => answers.value.subjective.includes(k));
   
-  if (q1Correct && q2Correct && q3Correct && subjectiveCorrect) {
+  if (allMcqCorrect && subjectiveCorrect) {
     assessmentResult.value = 'success';
     setTimeout(() => { currentPage.value = 'certificate'; }, 1500);
   } else {
@@ -399,26 +472,28 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#020617] text-slate-100 font-sans selection:bg-cyan-500/30 overflow-hidden relative">
+  <div class="min-h-screen bg-[#020617] text-slate-100 font-sans selection:bg-cyan-500/30 overflow-x-hidden overflow-y-auto relative">
     <!-- Background Effects -->
-    <div class="absolute inset-0 bg-[radial-gradient(circle_at_50%_-20%,#083344,transparent)] pointer-events-none"></div>
-    <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10 pointer-events-none"></div>
+    <div class="fixed inset-0 bg-[radial-gradient(circle_at_50%_-20%,#083344,transparent)] pointer-events-none"></div>
+    <div class="fixed inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10 pointer-events-none"></div>
     
     <!-- Floating Particles -->
-    <div v-for="n in 20" :key="n" 
-      class="absolute rounded-full bg-cyan-500/20 blur-xl animate-pulse"
-      :style="{
-        width: Math.random() * 100 + 50 + 'px',
-        height: Math.random() * 100 + 50 + 'px',
-        left: Math.random() * 100 + '%',
-        top: Math.random() * 100 + '%',
-        animationDelay: Math.random() * 5 + 's',
-        animationDuration: Math.random() * 10 + 10 + 's'
-      }"
-    ></div>
+    <div class="fixed inset-0 pointer-events-none overflow-hidden z-0">
+      <div v-for="n in 20" :key="n" 
+        class="absolute rounded-full bg-cyan-500/20 blur-xl animate-pulse"
+        :style="{
+          width: Math.random() * 100 + 50 + 'px',
+          height: Math.random() * 100 + 50 + 'px',
+          left: Math.random() * 100 + '%',
+          top: Math.random() * 100 + '%',
+          animationDelay: Math.random() * 5 + 's',
+          animationDuration: Math.random() * 10 + 10 + 's'
+        }"
+      ></div>
+    </div>
 
     <!-- Main Content -->
-    <main class="relative z-10 max-w-5xl mx-auto px-6 py-12 h-screen flex flex-col">
+    <main class="relative z-10 max-w-5xl mx-auto px-6 py-12 min-h-screen flex flex-col">
       
       <!-- Header -->
       <header class="flex justify-between items-center mb-12">
@@ -586,17 +661,31 @@ onMounted(() => {
       </section>
 
       <!-- Page 2: Analysis Mode -->
-      <section v-if="currentPage === 'analysis'" class="flex-1 flex flex-col gap-8 relative">
+      <section v-if="currentPage === 'analysis'" class="flex-1 flex flex-col gap-8 relative pb-8">
         <!-- AI Tutor Header -->
-        <div class="bg-slate-900/50 border border-cyan-500/20 rounded-2xl p-6 flex items-start gap-4 backdrop-blur-md">
-          <div class="w-12 h-12 bg-cyan-500/20 rounded-full flex items-center justify-center border border-cyan-500/30 shrink-0">
-            <div class="w-6 h-6 bg-cyan-400 rounded-full animate-pulse"></div>
+        <div class="flex flex-col gap-4">
+          <div class="bg-slate-900/50 border border-cyan-500/20 rounded-2xl p-6 flex items-start gap-4 backdrop-blur-md">
+            <div class="w-12 h-12 bg-cyan-500/20 rounded-full flex items-center justify-center border border-cyan-500/30 shrink-0">
+              <div class="w-6 h-6 bg-cyan-400 rounded-full animate-pulse"></div>
+            </div>
+            <div class="space-y-1">
+              <p class="text-cyan-400 text-xs font-bold uppercase tracking-wider">AI 导师引导中</p>
+              <p class="text-lg text-slate-200 font-medium">
+                第 <span class="text-cyan-400">{{ analysisPass + 1 }}</span> 轮比较：请观察索引 {{ currentIndex }} 和 {{ currentIndex + 1 }} 的星核，它们需要交换吗？
+              </p>
+            </div>
           </div>
-          <div class="space-y-1">
-            <p class="text-cyan-400 text-xs font-bold uppercase tracking-wider">AI 导师引导中</p>
-            <p class="text-lg text-slate-200 font-medium">
-              第 <span class="text-cyan-400">{{ analysisPass + 1 }}</span> 轮比较：请观察索引 {{ currentIndex }} 和 {{ currentIndex + 1 }} 的星核，它们需要交换吗？
-            </p>
+          
+          <!-- Stats Bar -->
+          <div class="flex justify-center gap-8 text-sm">
+            <div class="flex items-center gap-2 bg-slate-800/50 px-4 py-2 rounded-full border border-slate-700">
+              <span class="text-slate-400">本轮比较次数:</span>
+              <span class="text-cyan-400 font-bold text-lg">{{ currentRoundComparisons }}</span>
+            </div>
+            <div class="flex items-center gap-2 bg-slate-800/50 px-4 py-2 rounded-full border border-slate-700">
+              <span class="text-slate-400">本轮交换次数:</span>
+              <span class="text-purple-400 font-bold text-lg">{{ currentRoundSwaps }}</span>
+            </div>
           </div>
         </div>
 
@@ -610,7 +699,7 @@ onMounted(() => {
           >
             <!-- Scanner Box (Tractor Beam) - Now "passes through" -->
             <div 
-              class="absolute h-[140%] border-[3px] border-cyan-400 bg-cyan-400/10 rounded-2xl transition-all duration-300 ease-out shadow-[0_0_40px_rgba(34,211,238,0.4)] z-20 pointer-events-none"
+              class="absolute h-[140%] border-[3px] border-cyan-400 bg-cyan-400/10 rounded-2xl transition-all duration-300 ease-out shadow-[0_0_40px_rgba(34,211,238,0.4)] z-20 pointer-events-none flex justify-center"
               :style="{ 
                 width: '136px', 
                 left: (currentIndex * 72 + 40) + 'px',
@@ -618,11 +707,26 @@ onMounted(() => {
               }"
               :class="analysisError && 'border-red-500 bg-red-500/20 animate-[shake_0.4s_ease-in-out]'"
             >
+              <!-- Hint Tooltip -->
+              <div v-if="showAnalysisHint" class="absolute -top-16 bg-cyan-900/95 border border-cyan-400 text-cyan-50 px-4 py-2 rounded-xl text-sm font-medium whitespace-nowrap shadow-[0_0_20px_rgba(34,211,238,0.3)] animate-in fade-in zoom-in-95">
+                {{ analysisHintText }}
+                <div class="absolute -bottom-2 left-1/2 -translate-x-1/2 border-4 border-transparent border-t-cyan-400"></div>
+              </div>
+
               <!-- Inner Beam Effect -->
               <div class="absolute inset-0 bg-gradient-to-b from-cyan-400/20 to-transparent opacity-30"></div>
               
               <div class="absolute -top-12 left-1/2 -translate-x-1/2">
                 <Search class="w-8 h-8 text-cyan-400 animate-pulse" :class="analysisError && 'text-red-500'" />
+              </div>
+            </div>
+
+            <!-- Swap Markers between bubbles -->
+            <div class="absolute inset-0 pointer-events-none z-0">
+              <div v-for="idx in swappedIndices" :key="'swap-'+idx"
+                   class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 text-purple-400 bg-slate-900/80 rounded-full p-1 border border-purple-500/30 shadow-[0_0_10px_rgba(168,85,247,0.4)] animate-in zoom-in"
+                   :style="{ left: (108 + idx * 72) + 'px' }">
+                <ArrowLeftRight class="w-4 h-4" />
               </div>
             </div>
 
@@ -634,7 +738,8 @@ onMounted(() => {
               >
                 <div :class="cn(
                   'w-12 h-12 rounded-full flex items-center justify-center text-lg font-bold transition-all duration-500',
-                  bubble.isLocked ? 'bg-slate-800 border border-slate-700 opacity-50' : 'bg-gradient-to-br from-cyan-400/20 to-blue-600/40 border border-cyan-400/30 shadow-lg backdrop-blur-md',
+                  bubble.isLocked ? 'bg-slate-800 border border-slate-700 opacity-50' : 
+                  'bg-gradient-to-br from-cyan-400/20 to-blue-600/40 border border-cyan-400/30 shadow-lg backdrop-blur-md',
                   (index === currentIndex || index === currentIndex + 1) && !bubble.isLocked && 'scale-125 ring-2 ring-cyan-400 shadow-[0_0_25px_rgba(34,211,238,0.5)]',
                   isSwapping && (index === currentIndex || index === currentIndex + 1) && 'animate-swapping'
                 )">
@@ -646,7 +751,7 @@ onMounted(() => {
           </div>
 
           <!-- Logic Buttons -->
-          <div class="flex flex-col items-center gap-4">
+          <div v-if="!showLogDialog" class="flex flex-col items-center gap-4">
             <div class="flex gap-6">
               <button 
                 @click="checkAnalysisLogic(true)"
@@ -667,60 +772,66 @@ onMounted(() => {
             <button @click="showAnalysisHint = true" class="text-cyan-400 hover:text-cyan-300 text-sm flex items-center gap-1 transition-colors">
               <AlertCircle class="w-4 h-4" /> 需要提示吗？
             </button>
-            <div v-if="showAnalysisHint" class="bg-cyan-900/50 border border-cyan-500/30 text-cyan-200 px-6 py-3 rounded-xl text-sm max-w-lg text-center animate-in fade-in slide-in-from-top-2">
-              {{ analysisHintText }}
-            </div>
           </div>
-        </div>
 
-        <!-- Log Dialog (Bottom-aligned to not block bubbles) -->
-        <div v-if="showLogDialog" class="absolute bottom-0 left-1/2 -translate-x-1/2 z-50 w-full max-w-2xl mb-4">
-          <div class="bg-slate-900 border-2 border-cyan-500/50 p-6 rounded-3xl space-y-4 shadow-2xl backdrop-blur-xl">
-            <div class="flex justify-between items-center">
-              <h3 class="text-xl font-bold text-white flex items-center gap-2">
-                <Award class="text-cyan-400 w-5 h-5" />
-                第 {{ analysisPass + 1 }} 轮结束：请记录状态
-              </h3>
-              <p class="text-xs text-slate-400">请观察上方泡泡的数值并按顺序输入</p>
-            </div>
-            
-            <div class="grid grid-cols-2 gap-4">
-              <div class="col-span-2 space-y-1">
-                <label class="text-xs text-slate-400">本轮最终星核排列顺序（用逗号隔开）：</label>
-                <input 
-                  v-model="logInput"
-                  type="text"
-                  placeholder="例如: 10,20,30..."
-                  class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-lg font-mono text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                />
+          <!-- Log Dialog (Replaces Logic Buttons when active) -->
+          <div v-if="showLogDialog" class="w-full max-w-3xl mx-auto z-50 animate-in zoom-in-95">
+            <div class="bg-slate-900 border-2 border-cyan-500/50 p-6 rounded-3xl space-y-4 shadow-2xl backdrop-blur-xl">
+              <div class="flex justify-between items-center">
+                <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                  <Award class="text-cyan-400 w-5 h-5" />
+                  第 {{ analysisPass + 1 }} 轮结束：请记录状态
+                </h3>
+                <p class="text-xs text-slate-400">请观察上方泡泡的数值并按顺序输入</p>
               </div>
-              <div class="space-y-1">
-                <label class="text-xs text-slate-400">本轮比较次数：</label>
-                <input 
-                  v-model="comparisonsInput"
-                  type="number"
-                  placeholder="输入次数"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-lg font-mono text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                />
+              
+              <div class="grid grid-cols-2 gap-4">
+                <div class="col-span-2 space-y-1">
+                  <label class="text-xs text-slate-400">本轮最终星核排列顺序（用逗号隔开）：</label>
+                  <input 
+                    v-model="logInput"
+                    type="text"
+                    placeholder="例如: 10,20,30..."
+                    class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-lg font-mono text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs text-slate-400">本轮比较次数：</label>
+                  <input 
+                    v-model="comparisonsInput"
+                    type="number"
+                    placeholder="输入次数"
+                    class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-lg font-mono text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-xs text-slate-400">本轮交换次数：</label>
+                  <input 
+                    v-model="swapsInput"
+                    type="number"
+                    placeholder="输入次数"
+                    class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-lg font-mono text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+                    @keyup.enter="submitLog"
+                  />
+                </div>
               </div>
-              <div class="space-y-1">
-                <label class="text-xs text-slate-400">本轮交换次数：</label>
-                <input 
-                  v-model="swapsInput"
-                  type="number"
-                  placeholder="输入次数"
-                  class="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-lg font-mono text-cyan-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                  @keyup.enter="submitLog"
-                />
+              <div v-if="logErrorMessage" class="p-3 bg-red-500/20 border border-red-500/50 rounded-xl text-red-400 text-sm">
+                {{ logErrorMessage }}
               </div>
-            </div>
-            <div class="flex justify-end pt-2">
-              <button 
-                @click="submitLog"
-                class="px-8 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold transition-all"
-              >
-                确认记录
-              </button>
+              <div class="flex justify-end pt-2 gap-4">
+                <button 
+                  @click="showHistoryDialog = true"
+                  class="px-8 py-3 bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 rounded-xl font-bold transition-all"
+                >
+                  已排序轮次记录
+                </button>
+                <button 
+                  @click="submitLog"
+                  class="px-8 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold transition-all"
+                >
+                  确认记录
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -772,7 +883,18 @@ onMounted(() => {
             </div>
 
             <!-- Chat Input Area -->
-            <div class="p-4 bg-slate-800/50 border-t border-slate-700/50">
+            <div class="p-4 bg-slate-800/50 border-t border-slate-700/50 flex flex-col gap-3">
+              <!-- Quick Replies -->
+              <div class="flex flex-wrap gap-2">
+                <button 
+                  v-for="reply in quickReplies" 
+                  :key="reply"
+                  @click="chatInput += (chatInput ? '，' : '') + reply"
+                  class="px-3 py-1.5 bg-slate-800 border border-slate-700 hover:border-cyan-500/50 text-slate-300 hover:text-cyan-300 text-xs rounded-lg transition-colors text-left"
+                >
+                  {{ reply }}
+                </button>
+              </div>
               <form @submit.prevent="sendMessageToAi" class="flex gap-3">
                 <input 
                   v-model="chatInput"
@@ -813,6 +935,35 @@ onMounted(() => {
             </button>
           </div>
         </div>
+
+        <!-- History Dialog -->
+        <div v-if="showHistoryDialog" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
+          <div class="bg-slate-900 border border-cyan-500/30 p-8 rounded-3xl max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+              <h3 class="text-2xl font-bold text-white flex items-center gap-2">
+                <RotateCcw class="w-6 h-6 text-cyan-400" />
+                已排序轮次记录
+              </h3>
+              <button @click="showHistoryDialog = false" class="text-slate-400 hover:text-white transition-colors">
+                关闭
+              </button>
+            </div>
+            <div class="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+              <div v-for="record in sortedHistory" :key="record.round" class="bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+                <div class="flex justify-between items-center mb-2">
+                  <span class="text-cyan-400 font-bold">第 {{ record.round }} 轮</span>
+                  <div class="text-sm text-slate-400 flex gap-4">
+                    <span>比较: <span class="text-cyan-300">{{ record.comparisons }}</span> 次</span>
+                    <span>交换: <span class="text-purple-300">{{ record.swaps }}</span> 次</span>
+                  </div>
+                </div>
+                <div class="font-mono text-lg text-slate-200 tracking-widest break-all">
+                  {{ record.sequence }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </section>
 
       <!-- Page 3: Assessment Mode -->
@@ -825,48 +976,16 @@ onMounted(() => {
 
           <!-- Objective Questions -->
           <div class="space-y-8">
-            <div class="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl space-y-4">
-              <p class="text-lg font-medium text-slate-200">1. 探针每次同时框选几个泡泡？</p>
+            <div v-for="q in assessmentQuestions" :key="q.id" class="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl space-y-4">
+              <p class="text-lg font-medium text-slate-200">{{ q.title }}</p>
               <div class="grid grid-cols-1 gap-3">
-                <label v-for="opt in [{id:'all', t:'全部'}, {id:'adjacent', t:'相邻 2 个'}, {id:'any', t:'任意 2 个'}]" :key="opt.id"
+                <label v-for="opt in q.options" :key="opt.id"
                   class="flex items-center gap-3 p-4 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/50 transition-all"
-                  :class="answers.q1 === opt.id && 'border-cyan-500/50 bg-cyan-500/5 text-cyan-400'"
+                  :class="answers[q.id] === opt.id && 'border-cyan-500/50 bg-cyan-500/5 text-cyan-400'"
                 >
-                  <input type="radio" v-model="answers.q1" :value="opt.id" class="hidden" />
-                  <div class="w-5 h-5 rounded-full border-2 border-slate-700 flex items-center justify-center" :class="answers.q1 === opt.id && 'border-cyan-500'">
-                    <div v-if="answers.q1 === opt.id" class="w-2.5 h-2.5 rounded-full bg-cyan-500"></div>
-                  </div>
-                  <span>{{ opt.t }}</span>
-                </label>
-              </div>
-            </div>
-
-            <div class="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl space-y-4">
-              <p class="text-lg font-medium text-slate-200">2. 第一轮结束后，哪个数会被锁定在最后？</p>
-              <div class="grid grid-cols-1 gap-3">
-                <label v-for="opt in [{id:'min', t:'最小的数'}, {id:'max', t:'最大的数'}, {id:'random', t:'随机的一个数'}]" :key="opt.id"
-                  class="flex items-center gap-3 p-4 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/50 transition-all"
-                  :class="answers.q2 === opt.id && 'border-cyan-500/50 bg-cyan-500/5 text-cyan-400'"
-                >
-                  <input type="radio" v-model="answers.q2" :value="opt.id" class="hidden" />
-                  <div class="w-5 h-5 rounded-full border-2 border-slate-700 flex items-center justify-center" :class="answers.q2 === opt.id && 'border-cyan-500'">
-                    <div v-if="answers.q2 === opt.id" class="w-2.5 h-2.5 rounded-full bg-cyan-500"></div>
-                  </div>
-                  <span>{{ opt.t }}</span>
-                </label>
-              </div>
-            </div>
-
-            <div class="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl space-y-4">
-              <p class="text-lg font-medium text-slate-200">3. 如果整轮没有任何交换，说明什么？</p>
-              <div class="grid grid-cols-1 gap-3">
-                <label v-for="opt in [{id:'error', t:'程序死机了'}, {id:'done', t:'排序已经完成'}]" :key="opt.id"
-                  class="flex items-center gap-3 p-4 rounded-xl border border-slate-800 cursor-pointer hover:bg-slate-800/50 transition-all"
-                  :class="answers.q3 === opt.id && 'border-cyan-500/50 bg-cyan-500/5 text-cyan-400'"
-                >
-                  <input type="radio" v-model="answers.q3" :value="opt.id" class="hidden" />
-                  <div class="w-5 h-5 rounded-full border-2 border-slate-700 flex items-center justify-center" :class="answers.q3 === opt.id && 'border-cyan-500'">
-                    <div v-if="answers.q3 === opt.id" class="w-2.5 h-2.5 rounded-full bg-cyan-500"></div>
+                  <input type="radio" v-model="answers[q.id]" :value="opt.id" class="hidden" />
+                  <div class="w-5 h-5 rounded-full border-2 border-slate-700 flex items-center justify-center" :class="answers[q.id] === opt.id && 'border-cyan-500'">
+                    <div v-if="answers[q.id] === opt.id" class="w-2.5 h-2.5 rounded-full bg-cyan-500"></div>
                   </div>
                   <span>{{ opt.t }}</span>
                 </label>

@@ -57,6 +57,76 @@ const analysisError = ref(false);
 const swappedIndices = ref<number[]>([]);
 const logErrorCount = ref(0);
 const logErrorMessage = ref('');
+const isAnalysisComplete = ref(false);
+
+// State Preservation
+const gameSavedState = ref<any>(null);
+const analysisSavedState = ref<any>(null);
+
+const saveCurrentState = () => {
+  const state = {
+    bubbles: JSON.parse(JSON.stringify(bubbles.value)),
+    currentIndex: currentIndex.value,
+    passCount: passCount.value,
+    isGameOver: isGameOver.value,
+    passSuccess: passSuccess.value,
+    analysisStep: analysisStep.value,
+    analysisPass: analysisPass.value,
+    showLogDialog: showLogDialog.value,
+    showStepDesc: showStepDesc.value,
+    logInput: logInput.value,
+    analysisLogHistory: [...analysisLogHistory.value],
+    analysisError: analysisError.value,
+    swappedIndices: [...swappedIndices.value],
+    logErrorCount: logErrorCount.value,
+    logErrorMessage: logErrorMessage.value,
+    sortedHistory: JSON.parse(JSON.stringify(sortedHistory.value)),
+    isAnalysisComplete: isAnalysisComplete.value,
+  };
+  if (currentPage.value === 'game') gameSavedState.value = state;
+  if (currentPage.value === 'analysis') analysisSavedState.value = state;
+};
+
+const restoreState = (page: Page) => {
+  const state = page === 'game' ? gameSavedState.value : analysisSavedState.value;
+  if (state) {
+    bubbles.value = state.bubbles;
+    currentIndex.value = state.currentIndex;
+    passCount.value = state.passCount;
+    isGameOver.value = state.isGameOver;
+    passSuccess.value = state.passSuccess;
+    analysisStep.value = state.analysisStep;
+    analysisPass.value = state.analysisPass;
+    showLogDialog.value = state.showLogDialog;
+    showStepDesc.value = state.showStepDesc;
+    logInput.value = state.logInput;
+    analysisLogHistory.value = state.analysisLogHistory;
+    analysisError.value = state.analysisError;
+    swappedIndices.value = state.swappedIndices;
+    logErrorCount.value = state.logErrorCount;
+    logErrorMessage.value = state.logErrorMessage;
+    sortedHistory.value = state.sortedHistory;
+    isAnalysisComplete.value = state.isAnalysisComplete;
+    return true;
+  }
+  return false;
+};
+
+const switchPage = (page: Page) => {
+  if (currentPage.value === page) return;
+  saveCurrentState();
+  currentPage.value = page;
+  
+  if (page === 'game') {
+    if (!restoreState('game')) {
+      initBubbles(10);
+    }
+  } else if (page === 'analysis') {
+    if (!restoreState('analysis')) {
+      startAnalysis();
+    }
+  }
+};
 
 // AI Chat State
 interface ChatMessage {
@@ -220,7 +290,7 @@ const startAnalysis = () => {
   swappedIndices.value = [];
   showAnalysisHint.value = false;
   aiChatType.value = 'step';
-  currentPage.value = 'analysis';
+  isAnalysisComplete.value = false;
   
   sortedHistory.value = [{
     round: 0,
@@ -283,8 +353,23 @@ const submitLog = () => {
     showLogDialog.value = false;
     logErrorCount.value = 0;
     logErrorMessage.value = '';
-    aiChatType.value = 'step';
-    showStepDesc.value = true; // Ask for description after log
+    
+    if (analysisPass.value >= bubbles.value.length - 2) {
+      bubbles.value[0].isLocked = true;
+      aiChatType.value = 'final';
+      showStepDesc.value = true;
+      initChat();
+    } else {
+      analysisPass.value++;
+      currentIndex.value = 0;
+      logInput.value = '';
+      comparisonsInput.value = '';
+      swapsInput.value = '';
+      currentRoundComparisons.value = 0;
+      currentRoundSwaps.value = 0;
+      swappedIndices.value = [];
+      showAnalysisHint.value = false;
+    }
   } else {
     logErrorCount.value++;
     
@@ -404,27 +489,10 @@ const sendMessageToAi = async () => {
 };
 
 const finishAnalysisPass = () => {
-  if (aiChatType.value === 'step') {
-    analysisPass.value++;
-    currentIndex.value = 0;
+  if (aiChatType.value === 'final') {
     showStepDesc.value = false;
-    logInput.value = '';
-    comparisonsInput.value = '';
-    swapsInput.value = '';
-    currentRoundComparisons.value = 0;
-    currentRoundSwaps.value = 0;
-    swappedIndices.value = [];
-    showAnalysisHint.value = false;
-    logErrorCount.value = 0;
-    logErrorMessage.value = '';
-    
-    if (analysisPass.value >= bubbles.value.length - 1) {
-      bubbles.value[0].isLocked = true;
-      // Show final transition directly
-    }
-  } else {
-    showStepDesc.value = false;
-    currentPage.value = 'assessment';
+    isAnalysisComplete.value = true;
+    showHistoryDialog.value = true;
   }
 };
 
@@ -577,22 +645,26 @@ onMounted(() => {
         </div>
         <nav class="flex items-center gap-2 text-sm font-medium text-slate-400">
           <button 
-            @click="currentPage = 'game'; initBubbles(10)"
+            @click="switchPage('game')"
             :class="cn('px-3 py-1 rounded-full border transition-all hover:bg-slate-800', currentPage === 'game' ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'border-slate-800')"
           >
             1. 玩中学
           </button>
           <ChevronRight class="w-4 h-4" />
           <button 
-            @click="startAnalysis"
+            @click="switchPage('analysis')"
             :class="cn('px-3 py-1 rounded-full border transition-all hover:bg-slate-800', currentPage === 'analysis' ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'border-slate-800')"
           >
             2. 做中学
           </button>
           <ChevronRight class="w-4 h-4" />
           <button 
-            @click="currentPage = 'assessment'"
-            :class="cn('px-3 py-1 rounded-full border transition-all hover:bg-slate-800', currentPage === 'assessment' ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'border-slate-800')"
+            @click="isAnalysisComplete ? switchPage('assessment') : null"
+            :class="cn('px-3 py-1 rounded-full border transition-all', 
+              currentPage === 'assessment' ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'border-slate-800',
+              !isAnalysisComplete ? 'opacity-50 cursor-not-allowed text-slate-500' : 'hover:bg-slate-800'
+            )"
+            :title="!isAnalysisComplete ? '请先完成做中学' : ''"
           >
             3. 归纳提炼
           </button>
@@ -664,6 +736,13 @@ onMounted(() => {
 
         <!-- Controls -->
         <div class="flex gap-6 mt-4">
+          <button 
+            @click="initBubbles(10)"
+            class="px-8 py-5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-2xl font-bold text-slate-300 transition-all active:scale-95 flex items-center gap-3"
+          >
+            <RotateCcw class="w-6 h-6" />
+            重新开始
+          </button>
           <button 
             @click="handleSwap"
             :disabled="isGameOver"
@@ -747,7 +826,7 @@ onMounted(() => {
           </div>
           
           <!-- Stats Bar -->
-          <div class="flex justify-center gap-8 text-sm">
+          <div class="flex justify-center gap-8 text-sm items-center">
             <div class="flex items-center gap-2 bg-slate-800/50 px-4 py-2 rounded-full border border-slate-700">
               <span class="text-slate-400">本轮比较次数:</span>
               <span class="text-cyan-400 font-bold text-lg">{{ currentRoundComparisons }}</span>
@@ -756,6 +835,13 @@ onMounted(() => {
               <span class="text-slate-400">本轮交换次数:</span>
               <span class="text-purple-400 font-bold text-lg">{{ currentRoundSwaps }}</span>
             </div>
+            <button 
+              @click="startAnalysis"
+              class="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-full border border-slate-700 text-slate-300 transition-colors"
+            >
+              <RotateCcw class="w-4 h-4" />
+              重新开始
+            </button>
           </div>
         </div>
 
@@ -921,7 +1007,7 @@ onMounted(() => {
                 </div>
               </div>
               <button @click="finishAnalysisPass" class="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded-lg font-bold transition-all">
-                {{ aiChatType === 'step' ? '结束对话并进入下一轮' : '结束对话并进入归纳提炼' }}
+                {{ aiChatType === 'step' ? '结束对话并进入下一轮' : '结束对话并查看排序记录' }}
               </button>
             </div>
 
@@ -986,26 +1072,6 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- Final Transition -->
-        <div v-if="analysisPass >= bubbles.length - 1" class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
-          <div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full text-center space-y-6 shadow-2xl">
-            <div class="w-20 h-20 bg-cyan-500/20 rounded-full flex items-center justify-center mx-auto border border-cyan-500/50">
-              <CheckCircle2 class="w-10 h-10 text-cyan-400" />
-            </div>
-            <div class="space-y-2">
-              <h3 class="text-2xl font-bold text-white">逻辑追踪完成！</h3>
-              <p class="text-slate-400">你已经掌握了冒泡排序的严谨步骤。现在，准备好接受“算法工程师”的认证了吗？</p>
-            </div>
-            <button 
-              @click="currentPage = 'assessment'"
-              class="w-full py-4 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2"
-            >
-              进入考核
-              <ChevronRight class="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
         <!-- History Dialog -->
         <div v-if="showHistoryDialog" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
           <div class="bg-slate-900 border border-cyan-500/30 p-8 rounded-3xl max-w-2xl w-full max-h-[80vh] flex flex-col shadow-2xl">
@@ -1027,10 +1093,30 @@ onMounted(() => {
                     <span>交换: <span class="text-purple-300">{{ record.swaps }}</span> 次</span>
                   </div>
                 </div>
-                <div class="font-mono text-lg text-slate-200 tracking-widest break-all">
-                  {{ record.sequence }}
+                <div class="font-mono text-lg flex flex-wrap gap-2 mt-2">
+                  <span 
+                    v-for="(num, idx) in record.sequence.split(', ')" 
+                    :key="idx"
+                    :class="cn(
+                      'px-2 py-1 rounded flex items-center justify-center min-w-[2.5rem]',
+                      record.round > 0 && idx >= (record.round === 9 ? 0 : 10 - record.round)
+                        ? 'border border-red-500 text-red-400 bg-red-500/10'
+                        : 'border border-transparent text-slate-200 bg-slate-900/50'
+                    )"
+                  >
+                    {{ num }}
+                  </span>
                 </div>
               </div>
+            </div>
+            <div v-if="isAnalysisComplete" class="mt-6 flex justify-center">
+              <button 
+                @click="switchPage('assessment'); showHistoryDialog = false"
+                class="w-full py-4 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2"
+              >
+                进入归纳提炼
+                <ChevronRight class="w-5 h-5" />
+              </button>
             </div>
           </div>
         </div>

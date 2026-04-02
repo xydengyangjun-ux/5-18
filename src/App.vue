@@ -27,7 +27,7 @@ function cn(...inputs: ClassValue[]) {
 }
 
 // --- Types ---
-type Page = 'game' | 'analysis' | 'assessment' | 'certificate';
+type Page = 'game' | 'analysis' | 'assessment' | 'certificate' | 'extension';
 
 interface Bubble {
   id: number;
@@ -119,6 +119,8 @@ const checkQ2 = () => {
   }
 };
 
+const extensionSavedState = ref<any>(null);
+
 const saveCurrentState = () => {
   const state = {
     bubbles: JSON.parse(JSON.stringify(bubbles.value)),
@@ -148,9 +150,36 @@ const saveCurrentState = () => {
   };
   if (currentPage.value === 'game') gameSavedState.value = state;
   if (currentPage.value === 'analysis') analysisSavedState.value = state;
+  
+  if (currentPage.value === 'extension') {
+    extensionSavedState.value = {
+      extensionData: [...extensionData.value],
+      extensionCorrectRounds: JSON.parse(JSON.stringify(extensionCorrectRounds.value)),
+      extensionUserInputs: JSON.parse(JSON.stringify(extensionUserInputs.value)),
+      extensionCurrentRound: extensionCurrentRound.value,
+      extensionCompleted: extensionCompleted.value,
+      extensionBlanks: { ...extensionBlanks.value },
+      extensionBlanksResult: extensionBlanksResult.value
+    };
+  }
 };
 
 const restoreState = (page: Page) => {
+  if (page === 'extension') {
+    const state = extensionSavedState.value;
+    if (state) {
+      extensionData.value = state.extensionData;
+      extensionCorrectRounds.value = state.extensionCorrectRounds;
+      extensionUserInputs.value = state.extensionUserInputs;
+      extensionCurrentRound.value = state.extensionCurrentRound;
+      extensionCompleted.value = state.extensionCompleted;
+      extensionBlanks.value = state.extensionBlanks;
+      extensionBlanksResult.value = state.extensionBlanksResult;
+      return true;
+    }
+    return false;
+  }
+
   const state = page === 'game' ? gameSavedState.value : analysisSavedState.value;
   if (state) {
     bubbles.value = state.bubbles;
@@ -194,6 +223,10 @@ const switchPage = (page: Page) => {
   } else if (page === 'analysis') {
     if (!restoreState('analysis')) {
       startAnalysis();
+    }
+  } else if (page === 'extension') {
+    if (!restoreState('extension')) {
+      initExtension();
     }
   }
 };
@@ -372,7 +405,7 @@ const analysisHintText = computed(() => {
 });
 
 const startAnalysis = () => {
-  initBubbles(10); // Analysis with 10 bubbles
+  initBubbles(8); // Analysis with 8 bubbles
   analysisStep.value = 0;
   analysisPass.value = 0;
   analysisLogHistory.value = [];
@@ -693,9 +726,138 @@ const checkAssessment = () => {
   }
 };
 
+// Extension Task State
+const extensionData = ref<number[]>([]);
+const extensionCorrectRounds = ref<number[][]>([]);
+const extensionUserInputs = ref<string[][]>([]);
+const extensionCurrentRound = ref(0);
+const extensionCompleted = ref(false);
+
+const extensionBlanks = ref({
+  b1: '',
+  b2: '',
+  b3: '',
+  b4: '',
+  b5: '',
+  b6: ''
+});
+const extensionBlanksResult = ref<'idle' | 'success' | 'fail'>('idle');
+
+const extensionErrorDetails = ref({
+  show: false,
+  round: 0,
+  wrongIndices: [] as number[],
+  processSteps: [] as { sequence: number[], swapped: number[], comparing: number[] }[],
+  canClose: false
+});
+
+const initExtension = () => {
+  extensionData.value = Array.from({ length: 6 }, () => Math.floor(Math.random() * 120) + 80);
+  
+  let currentArr = [...extensionData.value];
+  extensionCorrectRounds.value = [];
+  for (let i = 0; i < 5; i++) {
+    for (let j = 0; j < 5 - i; j++) {
+      if (currentArr[j] > currentArr[j + 1]) {
+        let temp = currentArr[j];
+        currentArr[j] = currentArr[j + 1];
+        currentArr[j + 1] = temp;
+      }
+    }
+    extensionCorrectRounds.value.push([...currentArr]);
+  }
+  
+  extensionUserInputs.value = Array.from({ length: 5 }, () => Array(6).fill(''));
+  extensionCurrentRound.value = 0;
+  extensionCompleted.value = false;
+  
+  extensionBlanks.value = { b1: '', b2: '', b3: '', b4: '', b5: '', b6: '' };
+  extensionBlanksResult.value = 'idle';
+  extensionErrorDetails.value.show = false;
+};
+
+const checkExtensionRound = (roundIndex: number) => {
+  const userArr = extensionUserInputs.value[roundIndex].map(v => parseInt(v) || 0);
+  const correctArr = extensionCorrectRounds.value[roundIndex];
+  
+  const wrongIndices: number[] = [];
+  userArr.forEach((v, i) => {
+    if (v !== correctArr[i]) wrongIndices.push(i);
+  });
+  
+  if (wrongIndices.length === 0) {
+    if (roundIndex < 4) {
+      extensionCurrentRound.value++;
+      // Auto-fill previously sorted for the next round
+      for (let i = 5 - roundIndex; i < 6; i++) {
+        extensionUserInputs.value[roundIndex + 1][i] = extensionUserInputs.value[roundIndex][i];
+      }
+    } else {
+      extensionCompleted.value = true;
+    }
+  } else {
+    // Generate process steps for this round
+    const startArr = roundIndex === 0 ? [...extensionData.value] : [...extensionCorrectRounds.value[roundIndex - 1]];
+    const processSteps = [];
+    let currentArr = [...startArr];
+    processSteps.push({ sequence: [...currentArr], swapped: [], comparing: [] });
+
+    for (let j = 0; j < 5 - roundIndex; j++) {
+      const comparing = [j, j + 1];
+      if (currentArr[j] > currentArr[j + 1]) {
+        let temp = currentArr[j];
+        currentArr[j] = currentArr[j + 1];
+        currentArr[j + 1] = temp;
+        processSteps.push({ sequence: [...currentArr], swapped: [...comparing], comparing: [...comparing] });
+      } else {
+        processSteps.push({ sequence: [...currentArr], swapped: [], comparing: [...comparing] });
+      }
+    }
+
+    extensionErrorDetails.value = {
+      show: true,
+      round: roundIndex + 1,
+      wrongIndices,
+      processSteps,
+      canClose: false
+    };
+
+    setTimeout(() => {
+      extensionErrorDetails.value.canClose = true;
+    }, 3000);
+  }
+};
+
+const checkExtensionBlanks = () => {
+  const correct = {
+    b1: '相邻',
+    b2: '大',
+    b3: '交换',
+    b4: '最大数',
+    b5: '已排序',
+    b6: '交换'
+  };
+  
+  const isCorrect = 
+    extensionBlanks.value.b1 === correct.b1 &&
+    extensionBlanks.value.b2 === correct.b2 &&
+    extensionBlanks.value.b3 === correct.b3 &&
+    extensionBlanks.value.b4 === correct.b4 &&
+    extensionBlanks.value.b5 === correct.b5 &&
+    extensionBlanks.value.b6 === correct.b6;
+    
+  if (isCorrect) {
+    extensionBlanksResult.value = 'success';
+  } else {
+    extensionBlanksResult.value = 'fail';
+    setTimeout(() => { extensionBlanksResult.value = 'idle'; }, 2000);
+  }
+};
+
 // Lifecycle
 onMounted(() => {
   initBubbles(10);
+  initExtension();
 });
 
 </script>
@@ -750,14 +912,23 @@ onMounted(() => {
           </button>
           <ChevronRight class="w-4 h-4" />
           <button 
-            @click="isAnalysisComplete ? switchPage('assessment') : null"
+            @click="switchPage('extension')"
+            :class="cn('px-3 py-1 rounded-full border transition-all', 
+              currentPage === 'extension' ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'border-slate-800 hover:bg-slate-800'
+            )"
+          >
+            3. 拓展任务
+          </button>
+          <ChevronRight class="w-4 h-4" />
+          <button 
+            @click="extensionBlanksResult === 'success' ? switchPage('assessment') : null"
             :class="cn('px-3 py-1 rounded-full border transition-all', 
               currentPage === 'assessment' ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-300' : 'border-slate-800',
-              !isAnalysisComplete ? 'opacity-50 cursor-not-allowed text-slate-500' : 'hover:bg-slate-800'
+              extensionBlanksResult !== 'success' ? 'opacity-50 cursor-not-allowed text-slate-500' : 'hover:bg-slate-800'
             )"
-            :title="!isAnalysisComplete ? '请先完成做中学' : ''"
+            :title="extensionBlanksResult !== 'success' ? '请先完成拓展任务' : ''"
           >
-            3. 归纳提炼
+            4. 归纳提炼
           </button>
         </nav>
       </header>
@@ -1249,7 +1420,7 @@ onMounted(() => {
                     :key="idx"
                     :class="cn(
                       'px-2 py-1 rounded flex items-center justify-center min-w-[2.5rem]',
-                      record.round > 0 && idx >= (record.round === 9 ? 0 : 10 - record.round)
+                      record.round > 0 && idx >= (record.round === bubbles.length - 1 ? 0 : bubbles.length - record.round)
                         ? 'border border-red-500 text-red-400 bg-red-500/10'
                         : 'border border-transparent text-slate-200 bg-slate-900/50'
                     )"
@@ -1261,10 +1432,10 @@ onMounted(() => {
             </div>
             <div v-if="isAnalysisComplete" class="mt-6 flex justify-center">
               <button 
-                @click="switchPage('assessment'); showHistoryDialog = false"
+                @click="switchPage('extension'); showHistoryDialog = false"
                 class="w-full py-4 bg-gradient-to-r from-cyan-600 to-blue-600 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2"
               >
-                进入归纳提炼
+                进入拓展任务
                 <ChevronRight class="w-5 h-5" />
               </button>
             </div>
@@ -1272,7 +1443,7 @@ onMounted(() => {
         </div>
       </section>
 
-      <!-- Page 3: Assessment Mode -->
+      <!-- Page 4: Assessment Mode -->
       <section v-if="currentPage === 'assessment'" class="flex-1 flex gap-6 p-6">
         <!-- Left 70%: Questions -->
         <div class="w-[70%] space-y-8 pb-12">
@@ -1387,7 +1558,7 @@ onMounted(() => {
         </div>
       </section>
 
-      <!-- Page 4: Certificate -->
+      <!-- Page 5: Certificate -->
       <section v-if="currentPage === 'certificate'" class="flex-1 flex items-center justify-center p-6">
         <div class="relative max-w-2xl w-full aspect-[1.414/1] bg-slate-900 border-8 border-double border-cyan-500/30 p-12 overflow-hidden shadow-[0_0_100px_rgba(6,182,212,0.1)]">
           <!-- Decorative Corners -->
@@ -1427,6 +1598,203 @@ onMounted(() => {
         </div>
       </section>
 
+      <!-- Page 3: Extension Task -->
+      <section v-if="currentPage === 'extension'" class="flex-1 flex flex-col gap-8 relative pb-12">
+        <div class="text-center space-y-2">
+          <h2 class="text-3xl font-bold text-white">拓展任务：跳绳数据比一比</h2>
+          <p class="text-slate-400">随机抽取了6位同学的1分钟跳绳成绩，请你用冒泡排序帮他们排个序吧！</p>
+        </div>
+
+        <div class="bg-slate-900/50 border border-slate-800 rounded-3xl p-8 shadow-xl">
+          <div class="flex items-center gap-4 mb-8">
+            <h3 class="text-xl font-bold text-cyan-400">初始数据：</h3>
+            <div class="flex gap-3">
+              <div v-for="(num, idx) in extensionData" :key="'init-'+idx" class="w-14 h-14 bg-slate-800 border border-slate-700 rounded-xl flex items-center justify-center text-xl font-bold text-slate-200">
+                {{ num }}
+              </div>
+            </div>
+            <button @click="initExtension" class="ml-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm text-slate-300 transition-colors flex items-center gap-2">
+              <RotateCcw class="w-4 h-4" />
+              重新生成数据
+            </button>
+          </div>
+
+          <div class="space-y-6">
+            <div v-for="round in 5" :key="'ext-round-'+round" class="relative">
+              <div :class="cn('p-6 rounded-2xl border transition-all', extensionCurrentRound >= round - 1 ? 'bg-slate-800/40 border-slate-700' : 'bg-slate-900/20 border-slate-800/50 opacity-50 pointer-events-none')">
+                <div class="flex items-center gap-6">
+                  <div class="w-24 text-lg font-bold text-slate-300">第 {{ round }} 轮</div>
+                  
+                  <div class="flex gap-3 items-center">
+                    <!-- Unsorted Box -->
+                    <div class="flex gap-3 p-2 rounded-xl border-2 border-dashed border-slate-600 bg-slate-900/30 relative">
+                      <span class="absolute -top-3 left-3 bg-slate-900 px-2 text-xs text-slate-400">未排序区</span>
+                      <input 
+                        v-for="i in (6 - round)" 
+                        :key="'unsorted-'+i"
+                        v-model="extensionUserInputs[round - 1][i - 1]"
+                        type="text"
+                        class="w-12 h-12 bg-slate-950 border border-slate-700 rounded-lg text-center text-lg font-bold text-cyan-300 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                        :disabled="extensionCurrentRound !== round - 1"
+                      />
+                    </div>
+                    
+                    <!-- Newly Sorted Box (Red) -->
+                    <div class="relative">
+                      <span class="absolute -top-5 left-1/2 -translate-x-1/2 text-xs text-red-400 whitespace-nowrap">本轮归位</span>
+                      <input 
+                        v-model="extensionUserInputs[round - 1][6 - round]"
+                        type="text"
+                        class="w-12 h-12 bg-red-950/30 border-2 border-red-500 rounded-lg text-center text-lg font-bold text-red-400 focus:outline-none focus:border-red-400 focus:ring-1 focus:ring-red-400 shadow-[0_0_10px_rgba(239,68,68,0.2)]"
+                        :disabled="extensionCurrentRound !== round - 1"
+                      />
+                    </div>
+
+                    <!-- Previously Sorted Boxes -->
+                    <div v-if="round > 1" class="flex gap-3 p-2 rounded-xl border-2 border-slate-700 bg-slate-800/50 relative">
+                      <span class="absolute -top-3 left-3 bg-slate-800 px-2 text-xs text-slate-400">已排序区</span>
+                      <input 
+                        v-for="i in (round - 1)" 
+                        :key="'sorted-'+i"
+                        v-model="extensionUserInputs[round - 1][6 - round + i]"
+                        type="text"
+                        class="w-12 h-12 bg-slate-900 border border-slate-700 rounded-lg text-center text-lg font-bold text-slate-500 cursor-not-allowed"
+                        disabled
+                      />
+                    </div>
+                  </div>
+
+                  <div class="ml-auto flex items-center gap-4">
+                    <button 
+                      v-if="extensionCurrentRound === round - 1"
+                      @click="checkExtensionRound(round - 1)"
+                      class="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold transition-all"
+                    >
+                      验证
+                    </button>
+                    <div v-else-if="extensionCurrentRound > round - 1" class="flex items-center gap-2 text-green-400 font-bold">
+                      <CheckCircle2 class="w-5 h-5" />
+                      正确
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Extension Error Modal -->
+        <div v-if="extensionErrorDetails.show" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+          <div class="bg-slate-900 border border-red-500/50 p-8 rounded-3xl max-w-3xl w-full shadow-2xl flex flex-col gap-6 animate-in zoom-in-95">
+            <div class="flex items-center gap-4 text-red-400">
+              <AlertCircle class="w-8 h-8" />
+              <h3 class="text-2xl font-bold">填写有误</h3>
+            </div>
+
+            <div class="bg-slate-950 rounded-2xl p-6 border border-slate-800 space-y-4">
+              <p class="text-slate-300">
+                你在第 <span class="text-cyan-400 font-bold">{{ extensionErrorDetails.round }}</span> 轮中，
+                第 <span class="text-red-400 font-bold">{{ extensionErrorDetails.wrongIndices.map(i => i + 1).join(', ') }}</span> 个框填写错误。
+              </p>
+              <p class="text-slate-400 text-sm">下面是本轮正确的冒泡交换过程：</p>
+
+              <div class="space-y-3 mt-4 max-h-[40vh] overflow-y-auto custom-scrollbar pr-2">
+                <div v-for="(step, idx) in extensionErrorDetails.processSteps" :key="'step-'+idx" class="flex items-center gap-4">
+                  <span class="text-slate-500 text-sm w-16">{{ idx === 0 ? '初始' : `比较 ${idx}` }}</span>
+                  <div class="flex gap-2">
+                    <span
+                      v-for="(num, nIdx) in step.sequence"
+                      :key="'num-'+nIdx"
+                      :class="cn(
+                        'w-10 h-10 flex items-center justify-center rounded-lg font-bold text-sm transition-all',
+                        step.swapped.includes(nIdx) ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50' : 
+                        (step.comparing.includes(nIdx) ? 'bg-cyan-500/10 text-cyan-300 border border-cyan-500/30' : 'bg-slate-800 text-slate-300 border border-slate-700')
+                      )"
+                    >
+                      {{ num }}
+                    </span>
+                  </div>
+                  <span v-if="step.swapped.length > 0" class="text-purple-400 text-xs ml-2">发生交换</span>
+                  <span v-else-if="idx > 0" class="text-slate-500 text-xs ml-2">无需交换</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="flex justify-end mt-4">
+              <button
+                @click="extensionErrorDetails.show = false"
+                :disabled="!extensionErrorDetails.canClose"
+                :class="cn(
+                  'px-8 py-3 rounded-xl font-bold transition-all flex items-center gap-2',
+                  extensionErrorDetails.canClose
+                    ? 'bg-cyan-600 hover:bg-cyan-500 text-white shadow-lg active:scale-95'
+                    : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                )"
+              >
+                继续填写 {{ !extensionErrorDetails.canClose ? '(3s)' : '' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fill in the blanks -->
+        <div v-if="extensionCompleted" class="bg-slate-900/50 border border-cyan-500/30 rounded-3xl p-8 shadow-xl animate-in fade-in slide-in-from-bottom-8">
+          <div class="flex items-center gap-4 mb-6">
+            <div class="w-12 h-12 bg-cyan-500/20 rounded-full flex items-center justify-center border border-cyan-500/50 shrink-0">
+              <Bot class="w-7 h-7 text-cyan-400" />
+            </div>
+            <div>
+              <h3 class="text-2xl font-bold text-white">终极总结</h3>
+              <p class="text-cyan-400">用自然语言描述冒泡排序算法，你来帮我挖空</p>
+            </div>
+          </div>
+
+          <div class="space-y-6 text-lg text-slate-300 leading-loose bg-slate-950/50 p-6 rounded-2xl border border-slate-800">
+            <p>
+              <span class="font-bold text-cyan-400">第 1 步：</span>比较
+              <input v-model="extensionBlanks.b1" type="text" class="w-20 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              的两个数，如果第一个比第二个
+              <input v-model="extensionBlanks.b2" type="text" class="w-16 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              ，就
+              <input v-model="extensionBlanks.b3" type="text" class="w-20 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              位置。对每一对相邻数进行同样的操作，从开始两个数到最后两个数。操作后，排在最后面的数就是
+              <input v-model="extensionBlanks.b4" type="text" class="w-24 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              。
+            </p>
+            <p>
+              <span class="font-bold text-cyan-400">第 2 步：</span>除
+              <input v-model="extensionBlanks.b5" type="text" class="w-24 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              的数，重复第 1 步的操作，对其余数进行比较与交换，直到没有任何一对数需要
+              <input v-model="extensionBlanks.b6" type="text" class="w-20 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              位置。
+            </p>
+          </div>
+
+          <div class="mt-8 flex flex-col items-center gap-4">
+            <button 
+              @click="checkExtensionBlanks"
+              class="px-10 py-4 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white rounded-xl font-bold text-lg shadow-lg transition-all active:scale-95 flex items-center gap-2"
+            >
+              提交总结
+              <Send class="w-5 h-5" />
+            </button>
+            <p v-if="extensionBlanksResult === 'fail'" class="text-red-400 font-medium animate-pulse">有几个空填得不对哦，再仔细想想！</p>
+            <div v-if="extensionBlanksResult === 'success'" class="text-green-400 font-bold flex flex-col items-center gap-2 animate-in zoom-in">
+              <div class="flex items-center gap-2 text-xl">
+                <CheckCircle2 class="w-6 h-6" />
+                太棒了！你已经完全掌握了冒泡排序！
+              </div>
+              <button 
+                @click="switchPage('assessment')"
+                class="mt-4 px-8 py-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold shadow-lg transition-all active:scale-95 flex items-center gap-2"
+              >
+                进入归纳提炼
+                <ChevronRight class="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- Footer Info -->

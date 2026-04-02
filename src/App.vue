@@ -63,6 +63,62 @@ const isAnalysisComplete = ref(false);
 const gameSavedState = ref<any>(null);
 const analysisSavedState = ref<any>(null);
 
+// AI Tutor Q1 & Q2 State
+const showGameTutorQ1 = ref(false);
+const gameTutorQ1Answered = ref(false);
+const q1SelectedText = ref('');
+const q1Countdown = ref(5);
+let q1Timer: any = null;
+
+const showGameTutorQ2 = ref(false);
+const gameTutorQ2Answered = ref(false);
+const q2SelectedText = ref('');
+const q2Countdown = ref(5);
+let q2Timer: any = null;
+const showGoToAnalysisBtn = ref(false);
+
+const checkQ1 = () => {
+  if (q1SelectedText.value === '最大数') {
+    gameTutorQ1Answered.value = true;
+    q1Countdown.value = 5;
+    q1Timer = setInterval(() => {
+      q1Countdown.value--;
+      if (q1Countdown.value <= 0) {
+        clearInterval(q1Timer);
+        showGameTutorQ1.value = false;
+      }
+    }, 1000);
+  } else {
+    q1SelectedText.value = '不对哦，再想想';
+    setTimeout(() => {
+      if (q1SelectedText.value === '不对哦，再想想') {
+        q1SelectedText.value = '';
+      }
+    }, 1500);
+  }
+};
+
+const checkQ2 = () => {
+  if (q2SelectedText.value === '减少一次') {
+    gameTutorQ2Answered.value = true;
+    q2Countdown.value = 5;
+    q2Timer = setInterval(() => {
+      q2Countdown.value--;
+      if (q2Countdown.value <= 0) {
+        clearInterval(q2Timer);
+        showGoToAnalysisBtn.value = true;
+      }
+    }, 1000);
+  } else {
+    q2SelectedText.value = '不对哦，再想想';
+    setTimeout(() => {
+      if (q2SelectedText.value === '不对哦，再想想') {
+        q2SelectedText.value = '';
+      }
+    }, 1500);
+  }
+};
+
 const saveCurrentState = () => {
   const state = {
     bubbles: JSON.parse(JSON.stringify(bubbles.value)),
@@ -70,6 +126,13 @@ const saveCurrentState = () => {
     passCount: passCount.value,
     isGameOver: isGameOver.value,
     passSuccess: passSuccess.value,
+    showGameTutorQ1: showGameTutorQ1.value,
+    gameTutorQ1Answered: gameTutorQ1Answered.value,
+    q1SelectedText: q1SelectedText.value,
+    showGameTutorQ2: showGameTutorQ2.value,
+    gameTutorQ2Answered: gameTutorQ2Answered.value,
+    q2SelectedText: q2SelectedText.value,
+    showGoToAnalysisBtn: showGoToAnalysisBtn.value,
     analysisStep: analysisStep.value,
     analysisPass: analysisPass.value,
     showLogDialog: showLogDialog.value,
@@ -95,6 +158,13 @@ const restoreState = (page: Page) => {
     passCount.value = state.passCount;
     isGameOver.value = state.isGameOver;
     passSuccess.value = state.passSuccess;
+    showGameTutorQ1.value = state.showGameTutorQ1 || false;
+    gameTutorQ1Answered.value = state.gameTutorQ1Answered || false;
+    q1SelectedText.value = state.q1SelectedText || '';
+    showGameTutorQ2.value = state.showGameTutorQ2 || false;
+    gameTutorQ2Answered.value = state.gameTutorQ2Answered || false;
+    q2SelectedText.value = state.q2SelectedText || '';
+    showGoToAnalysisBtn.value = state.showGoToAnalysisBtn || false;
     analysisStep.value = state.analysisStep;
     analysisPass.value = state.analysisPass;
     showLogDialog.value = state.showLogDialog;
@@ -165,6 +235,9 @@ const assessmentResult = ref<'idle' | 'success' | 'fail'>('idle');
 
 // --- Logic ---
 
+let q1ShowTimer: any = null;
+let q2ShowTimer: any = null;
+
 const initBubbles = (count: number = 10) => {
   const values = Array.from({ length: count }, () => Math.floor(Math.random() * 90) + 10);
   bubbles.value = values.map((v, i) => ({
@@ -177,6 +250,19 @@ const initBubbles = (count: number = 10) => {
   passCount.value = 0;
   isGameOver.value = false;
   passSuccess.value = false;
+  
+  showGameTutorQ1.value = false;
+  gameTutorQ1Answered.value = false;
+  q1SelectedText.value = '';
+  if (q1Timer) clearInterval(q1Timer);
+  if (q1ShowTimer) clearTimeout(q1ShowTimer);
+  
+  showGameTutorQ2.value = false;
+  gameTutorQ2Answered.value = false;
+  q2SelectedText.value = '';
+  showGoToAnalysisBtn.value = false;
+  if (q2Timer) clearInterval(q2Timer);
+  if (q2ShowTimer) clearTimeout(q2ShowTimer);
 };
 
 // Page 1: Game Mode
@@ -252,9 +338,14 @@ const handleNext = () => {
       passSuccess.value = true;
       setTimeout(() => { passSuccess.value = false; }, 1500);
 
+      if (passCount.value === 1) {
+        q1ShowTimer = setTimeout(() => { showGameTutorQ1.value = true; }, 1500);
+      }
+
       if (passCount.value >= bubbles.value.length - 1) {
         bubbles.value[0].isLocked = true;
         isGameOver.value = true;
+        q2ShowTimer = setTimeout(() => { showGameTutorQ2.value = true; }, 1500);
       }
     } else {
       alert('注意！这一轮最大的泡泡还没有到达最右侧哦，请继续调整！');
@@ -788,21 +879,80 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- Success Dialog -->
-        <div v-if="isGameOver" class="fixed inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/80 backdrop-blur-sm">
-          <div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl max-w-md w-full text-center space-y-6 shadow-2xl">
-            <div class="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto border border-yellow-500/50">
-              <Trophy class="w-10 h-10 text-yellow-400" />
+        <!-- AI Tutor Q1 Modal -->
+        <div v-if="showGameTutorQ1" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+          <div class="bg-slate-900 border border-cyan-500/30 p-10 rounded-3xl max-w-2xl w-full space-y-8 shadow-2xl relative">
+            <div class="flex items-center gap-4 mb-6">
+              <div class="w-12 h-12 bg-cyan-500/20 rounded-full flex items-center justify-center border border-cyan-500/50 shrink-0">
+                <Bot class="w-7 h-7 text-cyan-400" />
+              </div>
+              <div>
+                <h3 class="text-2xl font-bold text-white">AI 导师小智</h3>
+                <p class="text-cyan-400">观察与思考</p>
+              </div>
             </div>
-            <div class="space-y-2">
-              <h3 class="text-2xl font-bold text-white">恭喜过关！</h3>
-              <p class="text-slate-400">你发现了吗？最大的泡泡总是最先浮出水面！进入下一关，我们将拆解这个魔法。</p>
+            
+            <div class="text-xl text-slate-200 leading-relaxed flex flex-wrap items-center gap-2">
+              <span>每一轮“冒泡”后，都会固定当前未排序数中</span>
+              <span class="inline-block min-w-[100px] h-10 border-b-2 border-cyan-500 text-center text-cyan-400 font-bold px-4">
+                {{ q1SelectedText }}
+              </span>
+              <span>的位置。</span>
             </div>
+            
+            <div class="flex gap-4 mt-6" v-if="!gameTutorQ1Answered">
+              <button @click="q1SelectedText = '最小数'; checkQ1()" class="px-6 py-3 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors">最小数</button>
+              <button @click="q1SelectedText = '最大数'; checkQ1()" class="px-6 py-3 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors">最大数</button>
+              <button @click="q1SelectedText = '中间数'; checkQ1()" class="px-6 py-3 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors">中间数</button>
+            </div>
+            
+            <div v-else class="p-6 bg-green-500/20 border border-green-500/50 rounded-xl text-green-400 flex flex-col items-center gap-3">
+              <CheckCircle2 class="w-10 h-10" />
+              <p class="text-lg font-bold">回答正确！</p>
+              <p class="text-sm">每一轮冒泡都会把当前最大的数固定在最右侧。窗口将在 {{ q1Countdown }} 秒后关闭，请继续排序...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Tutor Q2 Modal -->
+        <div v-if="showGameTutorQ2" class="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+          <div class="bg-slate-900 border border-cyan-500/30 p-10 rounded-3xl max-w-2xl w-full space-y-8 shadow-2xl relative">
+            <div class="flex items-center gap-4 mb-6">
+              <div class="w-12 h-12 bg-cyan-500/20 rounded-full flex items-center justify-center border border-cyan-500/50 shrink-0">
+                <Bot class="w-7 h-7 text-cyan-400" />
+              </div>
+              <div>
+                <h3 class="text-2xl font-bold text-white">AI 导师小智</h3>
+                <p class="text-cyan-400">总结与发现</p>
+              </div>
+            </div>
+            
+            <div class="text-xl text-slate-200 leading-relaxed flex flex-wrap items-center gap-2">
+              <span>第一轮已经将最大数固定在最右侧，比较的次数可以</span>
+              <span class="inline-block min-w-[120px] h-10 border-b-2 border-cyan-500 text-center text-cyan-400 font-bold px-4">
+                {{ q2SelectedText }}
+              </span>
+              <span>，即已经排好位置的最大数，不必参与后续的比较。</span>
+            </div>
+            
+            <div class="flex gap-4 mt-6" v-if="!gameTutorQ2Answered">
+              <button @click="q2SelectedText = '增加一次'; checkQ2()" class="px-6 py-3 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors">增加一次</button>
+              <button @click="q2SelectedText = '保持不变'; checkQ2()" class="px-6 py-3 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors">保持不变</button>
+              <button @click="q2SelectedText = '减少一次'; checkQ2()" class="px-6 py-3 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors">减少一次</button>
+            </div>
+            
+            <div v-else class="p-6 bg-green-500/20 border border-green-500/50 rounded-xl text-green-400 flex flex-col items-center gap-3">
+              <CheckCircle2 class="w-10 h-10" />
+              <p class="text-lg font-bold">回答正确！</p>
+              <p class="text-sm">这既是对每轮找到最大数意义的回应，又引出了后几轮需要处理的关键问题。{{ showGoToAnalysisBtn ? '' : `（${q2Countdown} 秒后进入下一关）` }}</p>
+            </div>
+
             <button 
+              v-if="showGoToAnalysisBtn"
               @click="startAnalysis"
-              class="w-full py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2"
+              class="w-full mt-4 py-4 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2 animate-in fade-in slide-in-from-bottom-4"
             >
-              进入：慢动作逻辑追踪
+              进入做中学：慢动作逻辑追踪
               <ChevronRight class="w-5 h-5" />
             </button>
           </div>

@@ -742,6 +742,7 @@ const extensionBlanks = ref({
   b6: ''
 });
 const extensionBlanksResult = ref<'idle' | 'success' | 'fail'>('idle');
+const extensionBlanksErrors = ref<string[]>([]);
 
 const extensionErrorDetails = ref({
   show: false,
@@ -838,21 +839,28 @@ const checkExtensionBlanks = () => {
     b6: '交换'
   };
   
-  const isCorrect = 
-    extensionBlanks.value.b1 === correct.b1 &&
-    extensionBlanks.value.b2 === correct.b2 &&
-    extensionBlanks.value.b3 === correct.b3 &&
-    extensionBlanks.value.b4 === correct.b4 &&
-    extensionBlanks.value.b5 === correct.b5 &&
-    extensionBlanks.value.b6 === correct.b6;
+  extensionBlanksErrors.value = [];
+  if (extensionBlanks.value.b1 !== correct.b1) extensionBlanksErrors.value.push('b1');
+  if (extensionBlanks.value.b2 !== correct.b2) extensionBlanksErrors.value.push('b2');
+  if (extensionBlanks.value.b3 !== correct.b3) extensionBlanksErrors.value.push('b3');
+  if (extensionBlanks.value.b4 !== correct.b4) extensionBlanksErrors.value.push('b4');
+  if (extensionBlanks.value.b5 !== correct.b5) extensionBlanksErrors.value.push('b5');
+  if (extensionBlanks.value.b6 !== correct.b6) extensionBlanksErrors.value.push('b6');
     
-  if (isCorrect) {
+  if (extensionBlanksErrors.value.length === 0) {
     extensionBlanksResult.value = 'success';
   } else {
     extensionBlanksResult.value = 'fail';
-    setTimeout(() => { extensionBlanksResult.value = 'idle'; }, 2000);
+    setTimeout(() => { extensionBlanksResult.value = 'idle'; }, 5000);
   }
 };
+
+watch(extensionBlanks, () => {
+  if (extensionBlanksResult.value === 'fail') {
+    extensionBlanksResult.value = 'idle';
+    extensionBlanksErrors.value = [];
+  }
+}, { deep: true });
 
 // Lifecycle
 onMounted(() => {
@@ -1752,20 +1760,20 @@ onMounted(() => {
           <div class="space-y-6 text-lg text-slate-300 leading-loose bg-slate-950/50 p-6 rounded-2xl border border-slate-800">
             <p>
               <span class="font-bold text-cyan-400">第 1 步：</span>比较
-              <input v-model="extensionBlanks.b1" type="text" class="w-20 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              <input v-model="extensionBlanks.b1" type="text" :class="cn('w-20 bg-slate-800 border-b-2 text-center focus:outline-none focus:bg-slate-700 px-2 mx-1 transition-colors', extensionBlanksErrors.includes('b1') ? 'border-red-500 text-red-400' : 'border-cyan-500 text-cyan-300')" placeholder="???" />
               的两个数，如果第一个比第二个
-              <input v-model="extensionBlanks.b2" type="text" class="w-16 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              <input v-model="extensionBlanks.b2" type="text" :class="cn('w-16 bg-slate-800 border-b-2 text-center focus:outline-none focus:bg-slate-700 px-2 mx-1 transition-colors', extensionBlanksErrors.includes('b2') ? 'border-red-500 text-red-400' : 'border-cyan-500 text-cyan-300')" placeholder="???" />
               ，就
-              <input v-model="extensionBlanks.b3" type="text" class="w-20 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              <input v-model="extensionBlanks.b3" type="text" :class="cn('w-20 bg-slate-800 border-b-2 text-center focus:outline-none focus:bg-slate-700 px-2 mx-1 transition-colors', extensionBlanksErrors.includes('b3') ? 'border-red-500 text-red-400' : 'border-cyan-500 text-cyan-300')" placeholder="???" />
               位置。对每一对相邻数进行同样的操作，从开始两个数到最后两个数。操作后，排在最后面的数就是
-              <input v-model="extensionBlanks.b4" type="text" class="w-24 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              <input v-model="extensionBlanks.b4" type="text" :class="cn('w-24 bg-slate-800 border-b-2 text-center focus:outline-none focus:bg-slate-700 px-2 mx-1 transition-colors', extensionBlanksErrors.includes('b4') ? 'border-red-500 text-red-400' : 'border-cyan-500 text-cyan-300')" placeholder="???" />
               。
             </p>
             <p>
               <span class="font-bold text-cyan-400">第 2 步：</span>除
-              <input v-model="extensionBlanks.b5" type="text" class="w-24 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              <input v-model="extensionBlanks.b5" type="text" :class="cn('w-24 bg-slate-800 border-b-2 text-center focus:outline-none focus:bg-slate-700 px-2 mx-1 transition-colors', extensionBlanksErrors.includes('b5') ? 'border-red-500 text-red-400' : 'border-cyan-500 text-cyan-300')" placeholder="???" />
               的数，重复第 1 步的操作，对其余数进行比较与交换，直到没有任何一对数需要
-              <input v-model="extensionBlanks.b6" type="text" class="w-20 bg-slate-800 border-b-2 border-cyan-500 text-center text-cyan-300 focus:outline-none focus:bg-slate-700 px-2 mx-1" placeholder="???" />
+              <input v-model="extensionBlanks.b6" type="text" :class="cn('w-20 bg-slate-800 border-b-2 text-center focus:outline-none focus:bg-slate-700 px-2 mx-1 transition-colors', extensionBlanksErrors.includes('b6') ? 'border-red-500 text-red-400' : 'border-cyan-500 text-cyan-300')" placeholder="???" />
               位置。
             </p>
           </div>
@@ -1778,7 +1786,10 @@ onMounted(() => {
               提交总结
               <Send class="w-5 h-5" />
             </button>
-            <p v-if="extensionBlanksResult === 'fail'" class="text-red-400 font-medium animate-pulse">有几个空填得不对哦，再仔细想想！</p>
+            <div v-if="extensionBlanksResult === 'fail'" class="text-red-400 font-medium flex flex-col items-center gap-2 animate-in zoom-in">
+              <p class="flex items-center gap-2"><AlertCircle class="w-5 h-5" /> 标红的空填得不对哦！</p>
+              <p class="text-sm text-slate-400">提示：相邻、大、交换、最大数、已排序、交换</p>
+            </div>
             <div v-if="extensionBlanksResult === 'success'" class="text-green-400 font-bold flex flex-col items-center gap-2 animate-in zoom-in">
               <div class="flex items-center gap-2 text-xl">
                 <CheckCircle2 class="w-6 h-6" />

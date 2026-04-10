@@ -12,14 +12,11 @@ export default defineConfig(({ mode }) => {
       vue(),
       tailwindcss(),
       legacy({
-        targets: ['chrome 109'],
+        targets: ['defaults', 'not IE 11'],
         renderLegacyChunks: true,
         polyfills: true
       })
     ],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || ''),
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
